@@ -1,0 +1,251 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); }
+.app { padding: 1rem 0; max-width: 680px; }
+.header { display: flex; align-items: center; gap: 10px; margin-bottom: 1.5rem; }
+.header h2 { font-size: 18px; font-weight: 500; color: var(--color-text-primary); }
+.status-dot { width: 10px; height: 10px; border-radius: 50%; background: #888; flex-shrink: 0; }
+.status-dot.active { background: #1D9E75; animation: pulse 1.5s infinite; }
+.status-dot.alert { background: #E24B4A; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.cam-wrap { position: relative; width: 100%; aspect-ratio: 4/3; background: var(--color-background-secondary); border-radius: var(--border-radius-lg); overflow: hidden; border: 0.5px solid var(--color-border-tertiary); margin-bottom: 1rem; }
+#video { width: 100%; height: 100%; object-fit: cover; display: block; }
+#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+.cam-label { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.55); color: #fff; font-size: 12px; padding: 3px 8px; border-radius: 4px; }
+.person-badge { position: absolute; top: 10px; right: 10px; background: #E24B4A; color: #fff; font-size: 12px; font-weight: 500; padding: 3px 10px; border-radius: 4px; display: none; }
+.person-badge.show { display: block; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 1rem; }
+.card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1rem 1.25rem; }
+.card label { font-size: 13px; color: var(--color-text-secondary); display: block; margin-bottom: 4px; }
+.card input { width: 100%; font-size: 14px; padding: 6px 8px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); background: var(--color-background-secondary); color: var(--color-text-primary); }
+.card input:focus { outline: none; box-shadow: 0 0 0 2px #378ADD55; }
+.full { grid-column: 1 / -1; }
+.actions { display: flex; gap: 10px; margin-bottom: 1rem; }
+.btn { flex: 1; padding: 9px 0; border: 0.5px solid var(--color-border-secondary); background: transparent; border-radius: var(--border-radius-md); font-size: 14px; color: var(--color-text-primary); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: background 0.15s; }
+.btn:hover { background: var(--color-background-secondary); }
+.btn:active { transform: scale(0.98); }
+.btn.primary { background: var(--color-background-info); border-color: var(--color-border-info); color: var(--color-text-info); }
+.btn.danger { background: var(--color-background-danger); border-color: var(--color-border-danger); color: var(--color-text-danger); }
+.log { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 12px; min-height: 100px; max-height: 160px; overflow-y: auto; font-size: 13px; border: 0.5px solid var(--color-border-tertiary); }
+.log-entry { padding: 3px 0; color: var(--color-text-secondary); border-bottom: 0.5px solid var(--color-border-tertiary); }
+.log-entry:last-child { border-bottom: none; }
+.log-entry.alert { color: var(--color-text-danger); }
+.log-entry.success { color: var(--color-text-success); }
+.log-label { font-size: 12px; color: var(--color-text-tertiary); margin-bottom: 6px; }
+.cooldown-bar { height: 3px; background: var(--color-background-secondary); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+.cooldown-fill { height: 100%; width: 0%; background: #378ADD; transition: width 0.5s linear; border-radius: 2px; }
+.tip { font-size: 12px; color: var(--color-text-tertiary); margin-top: 8px; line-height: 1.5; }
+</style>
+
+<h2 class="sr-only">Front door person detection app with SMS alerts</h2>
+<div class="app">
+  <div class="header">
+    <div class="status-dot" id="dot"></div>
+    <h2>Front door detector</h2>
+  </div>
+
+  <div class="cam-wrap">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="overlay"></canvas>
+    <span class="cam-label"><i class="ti ti-camera" aria-hidden="true"></i> Live</span>
+    <span class="person-badge" id="badge"><i class="ti ti-run" aria-hidden="true"></i> Person detected</span>
+  </div>
+
+  <div class="grid">
+    <div class="card full">
+      <label>Twilio Account SID</label>
+      <input type="password" id="sid" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+    </div>
+    <div class="card full">
+      <label>Twilio Auth Token</label>
+      <input type="password" id="token" placeholder="Your auth token" />
+    </div>
+    <div class="card">
+      <label>Twilio phone number (From)</label>
+      <input type="text" id="fromPhone" placeholder="+15005550006" />
+    </div>
+    <div class="card">
+      <label>Homeowner phone number (To)</label>
+      <input type="text" id="toPhone" placeholder="+919876543210" />
+    </div>
+    <div class="card">
+      <label>Alert cooldown (seconds)</label>
+      <input type="number" id="cooldown" value="30" min="5" max="300" />
+    </div>
+    <div class="card">
+      <label>Confidence threshold (%)</label>
+      <input type="number" id="threshold" value="70" min="30" max="95" />
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary" id="startBtn" onclick="startDetection()">
+      <i class="ti ti-player-play" aria-hidden="true"></i> Start detection
+    </button>
+    <button class="btn danger" id="stopBtn" onclick="stopDetection()" style="display:none">
+      <i class="ti ti-player-pause" aria-hidden="true"></i> Stop
+    </button>
+    <button class="btn" onclick="testSMS()">
+      <i class="ti ti-send" aria-hidden="true"></i> Test SMS
+    </button>
+  </div>
+
+  <div class="cooldown-bar"><div class="cooldown-fill" id="cooldownBar"></div></div>
+
+  <div style="margin-top: 1rem;">
+    <div class="log-label"><i class="ti ti-list" aria-hidden="true"></i> Event log</div>
+    <div class="log" id="log"><div class="log-entry">Waiting to start...</div></div>
+  </div>
+
+  <p class="tip"><i class="ti ti-info-circle" aria-hidden="true"></i> Your credentials are used only in-browser and never stored or sent anywhere except directly to Twilio's API.</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<script>
+let model = null, stream = null, rafId = null;
+let lastAlertTime = 0, cooldownTimer = null;
+let running = false;
+
+function log(msg, type='') {
+  const l = document.getElementById('log');
+  const now = new Date().toLocaleTimeString();
+  const entry = document.createElement('div');
+  entry.className = 'log-entry' + (type ? ' '+type : '');
+  entry.textContent = `[${now}] ${msg}`;
+  l.prepend(entry);
+  while(l.children.length > 30) l.removeChild(l.lastChild);
+}
+
+async function startDetection() {
+  document.getElementById('startBtn').style.display = 'none';
+  document.getElementById('stopBtn').style.display = 'flex';
+  document.getElementById('dot').className = 'status-dot active';
+  log('Loading COCO-SSD model...');
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+    const video = document.getElementById('video');
+    video.srcObject = stream;
+    await new Promise(r => video.onloadedmetadata = r);
+    video.play();
+
+    if (!model) {
+      model = await cocoSsd.load();
+      log('Model loaded — detection active', 'success');
+    }
+    running = true;
+    detect();
+  } catch(e) {
+    log('Camera error: ' + e.message, 'alert');
+    stopDetection();
+  }
+}
+
+function stopDetection() {
+  running = false;
+  if (rafId) cancelAnimationFrame(rafId);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  document.getElementById('startBtn').style.display = 'flex';
+  document.getElementById('stopBtn').style.display = 'none';
+  document.getElementById('dot').className = 'status-dot';
+  document.getElementById('badge').className = 'person-badge';
+  const overlay = document.getElementById('overlay');
+  overlay.getContext('2d').clearRect(0,0,overlay.width,overlay.height);
+  log('Detection stopped');
+}
+
+async function detect() {
+  if (!running) return;
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('overlay');
+  const ctx = canvas.getContext('2d');
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  const predictions = await model.detect(video);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  const threshold = parseInt(document.getElementById('threshold').value) / 100;
+  let personFound = false;
+
+  predictions.forEach(p => {
+    if (p.class === 'person' && p.score >= threshold) {
+      personFound = true;
+      const [x,y,w,h] = p.bbox;
+      ctx.strokeStyle = '#E24B4A';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x,y,w,h);
+      ctx.fillStyle = '#E24B4A';
+      ctx.fillRect(x, y-20, w, 20);
+      ctx.fillStyle = '#fff';
+      ctx.font = '12px sans-serif';
+      ctx.fillText(`Person ${Math.round(p.score*100)}%`, x+4, y-5);
+    }
+  });
+
+  document.getElementById('badge').className = 'person-badge' + (personFound ? ' show' : '');
+
+  if (personFound) {
+    const now = Date.now();
+    const cd = parseInt(document.getElementById('cooldown').value) * 1000;
+    if (now - lastAlertTime > cd) {
+      lastAlertTime = now;
+      log('Person detected — sending SMS alert...', 'alert');
+      await sendSMS();
+      startCooldownBar(cd);
+    }
+  }
+
+  rafId = requestAnimationFrame(detect);
+}
+
+function startCooldownBar(ms) {
+  const bar = document.getElementById('cooldownBar');
+  bar.style.width = '100%';
+  bar.style.transition = 'none';
+  setTimeout(() => {
+    bar.style.transition = `width ${ms/1000}s linear`;
+    bar.style.width = '0%';
+  }, 50);
+}
+
+async function sendSMS(isTest=false) {
+  const sid = document.getElementById('sid').value.trim();
+  const token = document.getElementById('token').value.trim();
+  const from = document.getElementById('fromPhone').value.trim();
+  const to = document.getElementById('toPhone').value.trim();
+
+  if (!sid || !token || !from || !to) {
+    log('Fill in all Twilio credentials first', 'alert');
+    return;
+  }
+
+  const body = isTest
+    ? '🔔 Test alert from your front door detector'
+    : `🚨 Person detected at your front door! (${new Date().toLocaleTimeString()})`;
+
+  try {
+    const resp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + btoa(`${sid}:${token}`),
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ From: from, To: to, Body: body })
+    });
+    const data = await resp.json();
+    if (data.sid) {
+      log(isTest ? 'Test SMS sent successfully' : 'SMS alert sent!', 'success');
+    } else {
+      log('SMS error: ' + (data.message || 'Unknown error'), 'alert');
+    }
+  } catch(e) {
+    log('SMS failed: ' + e.message, 'alert');
+  }
+}
+
+function testSMS() { sendSMS(true); }
+</script>
